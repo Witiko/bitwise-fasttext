@@ -1,0 +1,14 @@
+md5: c23a0e0e40db3b71c160a140383516fc
+wdir: .
+outs:
+- md5: ca206a0920f0f491f1098f4ba8b00a9f.dir
+  persist: false
+  metric: false
+  cache: true
+  path: results
+cmd: make results
+deps:
+- md5: 860a0a72f80a7c7365a3c1a8dba666b1.dir
+  path: models
+- md5: d06f48732efaeae76533ce0bef3edddb.dir
+  path: data

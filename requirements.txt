@@ -1,0 +1,6 @@
+dvc~=0.41.3
+gensim~=3.7.3
+jupyter~=1.0.0
+matplotlib~=3.0.3
+pandas~=0.24.2
+tqdm~=4.32.1

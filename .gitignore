@@ -1,0 +1,14 @@
+data
+models
+*.swo
+*.swp
+
+/data
+/models
+/analogies.zip
+/CLSR-EK.tar.gz
+/wordsim353.zip
+/rw.zip
+
+/datasets.zip
+/results
