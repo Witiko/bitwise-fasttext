@@ -15,6 +15,8 @@ MODELS_ITALIAN=$(addprefix models/it/,$(addsuffix /100,$(MODELS_METHODS)))
 
 MODEL_REGEX=models/([^/]*)/([^/]*)/([^/]*)
 
+COMPUTE_ACCURACY_3COSADD=Word2Bits/compute_accuracy
+COMPUTE_ACCURACY_3HAMMOR=Word2Bits/compute_accuracy_bitwise
 FASTTEXT=fastText/fasttext
 
 BUCKET=2000000
@@ -33,6 +35,28 @@ THREAD=16
 MEM=16gb
 SCRATCH=25g
 WS=5
+THRESHOLD=200000
+
+OUTPUT_BASENAME=32b_$(DIM)d_vectors_e$(EPOCH_TOTAL)
+
+define compute_accuracy =
+LANGUAGE=`sed -r 's#$(MODEL_REGEX)#\1#' <<< $(1)`
+case \$$LANGUAGE in
+cs) ANALOGY=$(CZECH_ANALOGY);;
+it) ANALOGY=$(ITALIAN_ANALOGY);;
+de) ANALOGY=$(GERMAN_ANALOGY);;
+en) ANALOGY=$(ENGLISH_ANALOGY);;
+*)  exit 0;;
+esac
+BASENAME=$(1)/$(OUTPUT_BASENAME)-$(2)
+INPUT=\$$BASENAME.vec
+COSADD_OUTPUT=\$${BASENAME}_accuracy-3cosadd.log
+HAMMOR_OUTPUT=\$${BASENAME}_accuracy-3hammor.log
+make -C $(dir $(COMPUTE_ACCURACY_3COSADD)) $(notdir $(COMPUTE_ACCURACY_3COSADD))
+$(COMPUTE_ACCURACY_3COSADD) -binary 0 \$$INPUT 0 $(THRESHOLD) < \$$ANALOGY &> \$$COSADD_OUTPUT
+make -C $(dir $(COMPUTE_ACCURACY_3HAMMOR)) $(notdir $(COMPUTE_ACCURACY_3HAMMOR))
+$(COMPUTE_ACCURACY_3HAMMOR) -binary 0 \$$INPUT 0 $(THRESHOLD) < \$$ANALOGY &> \$$HAMMOR_OUTPUT
+endef
 
 define skipgram =
 make -C $(dir $(FASTTEXT))
@@ -41,17 +65,12 @@ LANGUAGE=`sed -r 's#$(MODEL_REGEX)#\1#' <<< $(1)`
 TYPE=`sed -r 's#$(MODEL_REGEX)#\2#' <<< $(1)`
 SUB=`sed -r 's#$(MODEL_REGEX)#\3#' <<< $(1)`
 INPUT=data/wikimedia/wiki.\$$LANGUAGE.sub\$$SUB.txt
-OUTPUT_BASENAME=32b_$(DIM)d_vectors_e$(EPOCH_TOTAL)
-if [[ \$$TYPE = none ]]
-then
-  $(call skipgram_inner,\$$INPUT,$(1),\$$OUTPUT_BASENAME,$(2),$(3))
-elif [[ \$$TYPE = sbc || \$$TYPE = dbc ]]
-then
-  $(call skipgram_inner,\$$INPUT,$(1),\$$OUTPUT_BASENAME,$(2),$(3),-binarization \$$TYPE)
-elif [[ \$$TYPE = l2reg ]]
-then
-  $(call skipgram_inner,\$$INPUT,$(1),\$$OUTPUT_BASENAME,$(2),$(3),-l2reg $(L2REG))
-fi
+case \$$TYPE in
+none)    $(call skipgram_inner,\$$INPUT,$(1),$(2),$(3));;
+[sd]bc)  $(call skipgram_inner,\$$INPUT,$(1),$(2),$(3),-binarization \$$TYPE);;
+[sd]bc+) $(call skipgram_inner,\$$INPUT,$(1),$(2),$(3),-binarization \$${TYPE%+} -binarizeHidden);;
+l2reg)   $(call skipgram_inner,\$$INPUT,$(1),$(2),$(3),-l2reg $(L2REG));;
+esac
 endef
 
 define skipgram_inner =
@@ -64,10 +83,10 @@ define skipgram_inner =
   echo Training the model
   time $(FASTTEXT) skipgram \
                    -input "\$$SCRATCHDIR"/input \
-                   -output $(2)/$(3)-$(5) \
+                   -output $(2)/$(OUTPUT_BASENAME)-$(4) \
                    -bucket $(BUCKET) \
                    -dim $(DIM) \
-                   -epochSkip $(4) \
+                   -epochSkip $(3) \
                    -epochTotal $(EPOCH_TOTAL) \
                    -epoch $(EPOCH) \
                    -loss $(LOSS) \
@@ -76,28 +95,28 @@ define skipgram_inner =
                    -maxn $(MAX_N) \
                    -minCount $(MIN_COUNT) \
                    -neg $(NEG) \
-                   \$$(if [[ $(4) != 0 ]]
+                   \$$(if [[ $(3) != 0 ]]
                        then
-                         echo " -pretrainedModel $(2)/$(3)-$(4)"
+                         echo " -pretrainedModel $(2)/$(OUTPUT_BASENAME)-$(3)"
                        fi
                    ) \
                    -t $(T) \
                    -thread $(THREAD) \
                    -ws $(WS) \
-                   $(6)
+                   $(5)
   echo Trained the model
 
   echo Cleaning up
-  if [[ $(4) != 0 ]]
+  if [[ $(3) != 0 ]]
   then
-    rm $(2)/$(3)-$(4).{bin,vec}
+    rm $(2)/$(OUTPUT_BASENAME)-$(3).{bin,vec}
   fi
  echo Cleaned up
 ) |&
 while read -r LINE
 do
   printf '%s\t%s\n' \$$(date +%s) "\$$LINE"
-done | tee $(2)/$(3)-$(5).log
+done | tee $(2)/$(OUTPUT_BASENAME)-$(4).log
 endef
 
 define qsub_headers =
@@ -136,6 +155,7 @@ $(MODELS):
 	
 	cat > $$TEMPFILE <<-EOF
 	$(call qsub_headers,$@,#PBS -W depend=afterok:$$PREVIOUS_JOB,finish)
+	$(call compute_accuracy,$@,$$EPOCH_STOP)
 	touch $@/finished
 	EOF
 	PREVIOUS_JOB=$$(qsub $$TEMPFILE)

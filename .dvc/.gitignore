@@ -5,3 +5,4 @@
 /updater.lock
 /state-journal
 /state-wal
+/cache

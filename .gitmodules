@@ -1,3 +1,6 @@
 [submodule "fastText"]
 	path = fastText
 	url = https://github.com/Witiko/fastText.git
+[submodule "Word2Bits"]
+	path = Word2Bits
+	url = https://github.com/witiko/Word2Bits.git

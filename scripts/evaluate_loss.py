@@ -6,6 +6,7 @@ REGEX_PROGRESS = re.compile(r'^.*Progress:\s*(?P<done>[0-9.]*)%.*loss:\s*(?P<los
 REGEX_TIMESTAMP = re.compile(r'^(?P<timestamp>[0-9]*)\t.*$')
 REGEX_DIRNAME = re.compile(r'^models/(?P<language>..)/(?P<method>.*)$')
 REGEX_FILENAME = re.compile(r'^.*/100/32b_300d_vectors_e5-(?P<epoch>[0-9.]*)\.log$')
+REGEX_FILENAME_ANALOGY = re.compile(r'^.*_accuracy-.*$')
 
 all_losses = {}
 for dirname in glob('models/*/*'):
@@ -14,6 +15,9 @@ for dirname in glob('models/*/*'):
 
     losses = {}
     for filename in sorted(glob('{}/100/32b_300d_vectors_e5-*.log'.format(dirname))):
+        if REGEX_FILENAME_ANALOGY.match(filename):
+            continue
+
         filename_match = REGEX_FILENAME.match(filename)
         assert filename_match
 

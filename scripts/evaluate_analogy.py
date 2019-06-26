@@ -1,71 +1,85 @@
 from glob import glob
 import json
-from multiprocessing import Pool
 import re
 
-from gensim.models import KeyedVectors
-from tqdm import tqdm
+REGEX_FILENAME = re.compile(
+    r'^models/(?P<language>..)/(?P<method>.*)/100/32b_300d_vectors_e5-5_accuracy-(?P<function>.*)\.log$'
+)
+REGEX_ACCURACIES = re.compile(
+    r'^Total accuracy: (?P<total_accuracy>.*) % *'
+    r'Semantic accuracy: (?P<semantic_accuracy>.*) % *'
+    r'Syntactic accuracy: (?P<syntactic_accuracy>.*) % *$'
+)
+REGEX_ARITHMETIC_DURATION = r'^Solved analogies in (?P<duration>[0-9.]*) seconds$'
+REGEX_EVALUTION_DURATION = r'^Evaluated solution in (?P<duration>[0-9.]*) seconds$'
+LANGUAGES = set(['en', 'de', 'it', 'cs'])
 
-REGEX_DIRNAME = re.compile(r'^models/(?P<language>..)/(?P<method>.*)$')
-REGEX_SYNTACTIC = re.compile(r'^gram[0-9]*-.*$')
-FILENAMES = {
-    'en': 'data/english_analogy/google_analogy_words.txt',
-    'de': 'data/german_analogy/de_trans_Google_analogies.txt',
-    'it': 'data/italian_analogy/questions-words-ITA.txt',
-    'cs': 'data/czech_analogy/czech_emb_corpus_no_phrase.txt',
-}
+def get_accuracies(filename):
+    with open(filename, 'rt') as f:
+        matches = (re.match(REGEX_ACCURACIES, line) for line in f)
+        matches = [match for match in matches if match is not None]
+    assert matches, 'Failed to find accuracies in {}'.format(filename)
 
-def evaluate(dirname):
-    dirname_match = REGEX_DIRNAME.match(dirname)
-    assert dirname_match
+    match = matches[-1]
+    semantic_accuracy = float(match.group('semantic_accuracy'))
+    syntactic_accuracy = float(match.group('syntactic_accuracy'))
+    total_accuracy = float(match.group('total_accuracy'))
 
-    language = dirname_match.group('language')
-    method = dirname_match.group('method')
+    return (semantic_accuracy, syntactic_accuracy, total_accuracy)
 
-    vectors = KeyedVectors.load_word2vec_format('{}/100/32b_300d_vectors_e5-5.vec'.format(dirname))
-    semantic_correct, semantic_total, syntactic_correct, syntactic_total = 0, 0, 0, 0
-    _, sections = vectors.evaluate_word_analogies(FILENAMES[language], restrict_vocab=200000, dummy4unknown=False)
-    for section in sections:
-        if section['section'] == 'Total accuracy':
-            continue
-        if REGEX_SYNTACTIC.match(section['section']):
-            syntactic_correct += len(section['correct'])
-            syntactic_total += len(section['correct']) + len(section['incorrect'])
-        else:
-            semantic_correct += len(section['correct'])
-            semantic_total += len(section['correct']) + len(section['incorrect'])
-    assert syntactic_total > 0
-    assert syntactic_correct <= syntactic_total
-    assert semantic_total > 0
-    assert semantic_correct <= semantic_total
+def get_durations(filename):
+    evaluation_duration_match = None
+    arithmetic_duration_match = None
+    with open(filename, 'rt') as f:
+        for line in f:
+            if arithmetic_duration_match is None:
+               arithmetic_duration_match = re.match(REGEX_ARITHMETIC_DURATION, line)
+            if evaluation_duration_match is None:
+               evaluation_duration_match = re.match(REGEX_EVALUTION_DURATION, line)
+            if arithmetic_duration_match and evaluation_duration_match:
+                break
+    assert arithmetic_duration_match, 'Failed to find arithmetic duration in {}'.format(filename)
+    assert evaluation_duration_match, 'Failed to find evaluation duration in {}'.format(filename)
 
-    syntactic_accuracy = float(syntactic_correct) / float(syntactic_total) * 100.0
-    semantic_accuracy = float(semantic_correct) / float(semantic_total) * 100.0
-    total_accuracy = float(syntactic_correct + semantic_correct) / float(syntactic_total + semantic_total) * 100.0
-    return (language, method, syntactic_accuracy, semantic_accuracy, total_accuracy)
+    arithmetic_duration = float(arithmetic_duration_match.group('duration'))
+    evaluation_duration = float(evaluation_duration_match.group('duration'))
+    return (arithmetic_duration, evaluation_duration)
 
-dirnames = []
-for dirname in glob('models/*/*'):
-    dirname_match = REGEX_DIRNAME.match(dirname)
-    assert dirname_match
+filenames = []
+for filename in glob('models/*/*/100/*_accuracy-*.log'):
+    filename_match = REGEX_FILENAME.match(filename)
+    assert filename_match
 
-    language = dirname_match.group('language')
-    method = dirname_match.group('method')
+    language = filename_match.group('language')
+    if language in LANGUAGES:
+        filenames.append(filename)
 
-    if language in FILENAMES.keys():
-        dirnames.append(dirname)
+results = {}
+for filename in filenames:
+    filename_match = REGEX_FILENAME.match(filename)
 
-accuracies = {}
-with Pool(None) as pool:
-    for language, method, syntactic_accuracy, semantic_accuracy, total_accuracy in tqdm(pool.imap_unordered(evaluate, dirnames), total=len(dirnames)):
-        if language not in accuracies:
-            accuracies[language] = {
-                'syntactic': {},
-                'semantic': {},
-                'total': {},
-            }
-        accuracies[language]['syntactic'][method] = syntactic_accuracy
-        accuracies[language]['semantic'][method] = semantic_accuracy
-        accuracies[language]['total'][method] = total_accuracy
+    language = filename_match.group('language')
+    if language not in results:
+        results[language] = {}
 
-print(json.dumps(accuracies, sort_keys=True, indent=4))
+    method = filename_match.group('method')
+    if method not in results[language]:
+        results[language][method] = {}
+
+    function = filename_match.group('function')
+    assert function not in results[language][method]
+    results[language][method][function] = {
+        'accuracies': {},
+        'durations': {},
+    }
+
+    semantic_accuracy, syntactic_accuracy, total_accuracy = get_accuracies(filename)
+    results[language][method][function]['accuracies']['semantic'] = semantic_accuracy
+    results[language][method][function]['accuracies']['syntactic'] = syntactic_accuracy
+    results[language][method][function]['accuracies']['total'] = total_accuracy
+
+    arithmetic_duration, evaluation_duration = get_durations(filename)
+    results[language][method][function]['durations']['vector arithmetic'] = arithmetic_duration
+    results[language][method][function]['durations']['nearest neighbor'] = evaluation_duration
+
+print(json.dumps(results, sort_keys=True, indent=4))

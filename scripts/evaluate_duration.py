@@ -2,6 +2,7 @@ from glob import glob
 import json
 import re
 
+REGEX_FILENAME_ANALOGY = re.compile(r'^.*_accuracy-.*$')
 REGEX_BEGINNING = re.compile(r'^.*Progress:.*$')
 REGEX_END = re.compile(r'^.*Saving model to file .*$')
 REGEX_TIMESTAMP = re.compile(r'^(?P<timestamp>[0-9]*)\t.*$')
@@ -14,6 +15,9 @@ for dirname in glob('models/*/*'):
 
     duration = 0
     for filename in glob('{}/100/32b_300d_vectors_e5-*.log'.format(dirname)):
+        if REGEX_FILENAME_ANALOGY.match(filename):
+            continue
+
         with open(filename, 'rt') as f:
             lines = f.readlines()
             beginnings = list(filter(REGEX_BEGINNING.search, lines))
